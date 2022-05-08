@@ -1,0 +1,996 @@
+---
+title: "COVID_finals"
+author: "Hedy"
+date: "5/7/2022"
+output:
+  html_document:
+    theme: cerulean
+    highlight: textmate
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
+library(tidyverse)
+library(lubridate)
+```
+
+
+## Finals assignment
+
+The instructions for the assignment are to *"Import, tidy and analyze the COVID19 data set from the Johns Hopkins github site. This is the same data set I used in class. Feel free to repeat and reuse what I did if you want to. Be sure your project is reproducible and contains some visualization and analysis that is unique to your project. You may use the data to do any analysis that is of interest to you. You should include at least two visualizations and one model.  Be sure to identify any bias possible in the data and in your analysis."*
+
+I followed the step by step process delineated in the lecture videos for week 3 to import, wrangle, analyse and visualize the data. I wrote the code in an R Markdown documents and made sure to document each step clearly so that the analysis will be reproducible.
+I also included the model mentioned in the lecture. Intermingled with this process I included additional analyses, visualizations, and models.
+
+
+### Import and read data sets
+
+```{r import-files}
+
+# import and read files
+
+url_in <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_US.csv", "time_series_covid19_deaths_global.csv")
+
+urls <- str_c(url_in, file_names)
+
+us_cases <- read_csv(urls[1], show_col_types = FALSE)
+global_cases <- read_csv(urls[2], show_col_types = FALSE)
+us_deaths <- read_csv(urls[3], show_col_types = FALSE)
+global_deaths <- read_csv(urls[4], show_col_types = FALSE)
+
+
+```
+
+
+### Explore and tidy data sets for the US
+
+Explore `us_cases`
+
+```{r}
+head(us_cases, 10)
+
+```
+Tidy `us_cases`
+
+```{r}
+us_cases <- us_cases %>%
+    pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+
+head(us_cases, 10)
+
+
+```
+
+
+Explore `us_deaths`
+
+```{r}
+head(us_deaths)
+
+```
+
+Tidy `us_deaths`
+
+```{r}
+us_deaths <- us_deaths %>%
+    pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+  
+head(us_deaths, 10)
+
+```
+
+### Join the US data sets
+
+```{r}
+us <- us_cases %>%
+  full_join(us_deaths)
+
+head(us, 10)
+
+```
+
+Evaluate the `summary` for potential problems.
+
+```{r}
+summary(us)
+
+```
+
+If minimum number of `cases` or `deaths` is a negative number,
+`filter` rows where either the `cases` or `deaths` variable is entered as less than 0.
+
+```{r}
+#filter data entries where the number of cases or deaths is a negative number
+us <- us %>% 
+  filter(cases > -1) %>% 
+  filter(deaths > -1)
+  
+
+summary(us)
+```
+
+
+### Explore and tidy the global data sets
+
+
+Explore `global_cases`
+
+```{r}
+head(global_cases)
+
+```
+
+Tidy `global_cases`
+
+```{r}
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c("Province/State", "Country/Region", "Lat", "Long"),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+head(global_cases)
+
+
+```
+
+Explore `global_deaths`
+
+```{r}
+head(global_deaths)
+
+```
+
+
+Tidy `global_deaths`
+
+```{r}
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c("Province/State", "Country/Region", "Lat", "Long"),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+head(global_cases, 10)
+
+
+```
+
+
+### Join the global data sets
+
+`full_join` the two global data sets and `rename`two of the columns.
+`mutate` date to a date object.
+
+```{r}
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Province_State = "Province/State", 
+         Country_Region = "Country/Region") %>%
+  mutate(date = mdy(date))
+
+head(global, 10)
+```
+
+Evaluate the `summary` for potential problems.
+
+```{r}
+summary(global)
+
+```
+
+The minimum number of cases is zero. 
+`filter` out rows with no cases.
+
+```{r}
+global <- global %>%
+  filter(cases > 0)
+
+summary(global)
+```
+Now the minimum number of cases in any row is one.
+
+Check to ensure the Max in each of the `cases` and `deaths` columns is not a typographical error.
+
+```{r}
+global %>% filter(cases > 80000000)
+```
+Check the `deaths` column.
+
+```{r}
+global %>% filter(deaths > 990000)
+```
+
+### Add population data to global data set and a Combined_Key variable
+
+`Combined_Key` variable combines `Province_State` and  `Country_Region` into one variable.
+
+
+```{r}
+global <- global %>%
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        # combines the column names with a space
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+
+```
+
+Add `Population` from a csv file at the same Johns Hopkins website
+
+```{r}
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+```
+
+Read the csv file in and look at the column names
+
+```{r}
+uid <- read_csv(uid_lookup_url, show_col_types = FALSE)
+
+colnames(uid)
+```
+
+`select` desired columns
+
+```{r}
+uid <- uid %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+head(uid, 10)
+  
+```
+
+`left_join` the global population data set to the global COVID data set.
+Reorder the new data set columns (use `select`).
+
+```{r}
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+
+head(global, 10)
+
+
+```
+Although the Province_State column may be empty for many countries, it is reported for some.
+We can explore this by printing out the `unique` `Province_State` values in the `global` data set.
+
+```{r}
+head(unique(global$Province_State), 15)
+
+
+```
+
+
+### Analyse the global data
+
+To get the number of daily cases and deaths by country we need to `group_by` `Province_State`, `Country_Region`, and `date` and then `sum` the `cases`, `deaths`, and `Population` for each country.`
+Calculate death rate as deaths per million and add as a column (using `mutate`).
+`select` the column names to include.
+`ungroup` the data set.
+ 
+```{r}
+global_summary <- global %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Country_Region, date, cases, deaths, deaths_per_mill, Population)  %>%
+  ungroup() %>%
+  select(-Province_State) 
+
+
+tail(global_summary, 10)
+
+```
+ 
+ Look at the data for France
+ 
+```{r}
+France <- global_summary %>%
+  filter(cases > 0 & Country_Region == 'France')
+
+tail(France, 10)
+
+```
+
+
+### Analyze the US data
+
+#### Analyze data for a state - group by state
+
+Look at the column names for the US data set again
+
+
+```{r}
+colnames(us)
+```
+
+`filter` the data for WA state and look at the data set 
+
+```{r}
+us_WA <- us %>% 
+  filter(Province_State == 'Washington')
+
+head(us_WA, 10)
+```
+
+
+Each state contains multiple counties. To get the number of daily cases and deaths by state we need to `group_by` `Province_State`, `Country_Region`, and `date` and then `sum` the `cases`, `deaths`, and `Population` for the counties comprising each state.`
+Calculate death rate as deaths per million and add as a column (using `mutate`).
+`select` the column names to include.
+`ungroup` the data set.
+
+```{r}
+us_by_state <- us %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+tail(us_by_state, 10)
+```
+
+Look at the data for WA state in the last 10 days.
+
+```{r}
+us_WA <- us_by_state %>% 
+  filter(Province_State == 'Washington')
+
+tail(us_WA, 10)
+
+```
+
+
+#### Analyze data for the US - group all states together
+
+Analyze the daily `cases` and `deaths` in the entirely of the US.
+Look at the data for the US in the last 10 days.
+
+```{r}
+us_total <- us %>%
+  group_by(Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+tail(us_total, 10)
+```
+
+
+### Visualize the US data
+
+
+`filter` the us_total to only include dates with cases.
+Plot the `cases` as `geom_point`.
+Plot the `deaths` as `geom_point`.
+
+```{r}
+us_total %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_point(aes(color = "cases")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US - cases and deaths", y = "number")
+
+```
+
+Optimize the plot by:
+- Plotting the `cases` and `deaths` as `geom_line` as well.
+- Changing the y-axis to a logarithmic scale (`scale_y_log`).
+
+```{r}
+us_total %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US - cases and deaths", y = "number (log scale)")
+
+
+```
+
+Visualize the data for *WA state*.
+
+```{r}
+us_by_state %>%
+  filter(cases > 0 & Province_State == 'Washington') %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in WA state - cases and deaths", y = "number (log scale)")
+```
+
+Visualize the data for *New York state*.
+
+```{r}
+us_by_state %>%
+  filter(cases > 0 & Province_State == 'New York') %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in New York state", y = NULL)
+```
+
+The visualizations suggest that the number of cases deaths have leveled off.
+Is this true?
+
+
+### Analyzing data
+
+Explore the us_total data set:
+- current date
+- max total deaths
+- max deaths per million
+- max popultion
+
+```{r}
+max(us_total$date)
+max(us_total$deaths)
+max(us_total$deaths_per_mill)
+max(us_total$Population)
+```
+Explore the us_by_state data set for the same data:
+- current date
+- max total deaths
+- max deaths per million
+- max population
+
+```{r}
+max(us_by_state$date)
+max(us_by_state$deaths)
+max(us_by_state$deaths_per_mill)
+max(us_by_state$Population)
+
+```
+
+### Transform data - add new variables
+
+
+Add new variables:
+- `us_by_states` add: `new_cases` and `new_deaths`
+- `us_total` add: `new_cases` and `new_deaths`
+
+```{r}
+us_by_state <- us_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+us_total <- us_total %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+tail(us_total %>%
+       select(new_cases, new_deaths, everything()), 10)
+
+```
+
+
+### Visualize transformed data
+
+#### Visualize the new_cases and new_deaths in the us_total data set
+
+```{r}
+us_total %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = deaths, color = "new_deaths")) +
+  geom_point(aes(y = deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US - New Cases & New Deaths", y = "number (log scale)")
+
+```
+
+**Observation:** The plot demonstrates that the daily      have flattened and there are fluctuations in the number of daily `new_cases`. Last peak of daily `new_cases` - the largest peak so far - was in January 2022.
+
+
+#### Visualize the new_cases and new_deaths in WA state
+
+```{r}
+us_by_state %>%
+  filter(cases > 0 & Province_State == 'Washington') %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  #geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  #geom_line(aes(y = deaths, color = "new_deaths")) +
+  geom_point(aes(y = deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in WA state - New Cases & New Deaths", y = "number (log scale)")
+```
+
+
+#### Visualize the trend of new cases in three western states
+
+
+```{r}
+us_by_state %>%
+  filter(new_cases > 0 & Province_State == c("Washington", "California", "Oregon") ) %>%
+  ggplot(aes(x = date, y = new_cases, group = Province_State, color = factor(Province_State))) +
+  geom_point() +
+  scale_y_log10() +
+  theme(legend.position="right",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in WA, CA, and OR states - New Cases", y = "number of new cases (log scale)")
+
+```
+
+
+#### Visualize the trend of deaths in three western states
+
+
+```{r}
+# number of new deaths is numeric (i.e., not a log scale)
+us_by_state %>%
+  filter(new_deaths > 0 & Province_State == c("Washington", "California", "Oregon") ) %>%
+  ggplot(aes(x = date, y = deaths, group = Province_State, color = factor(Province_State))) +
+  geom_point() +
+  #scale_y_log10() +
+  theme(legend.position="right",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in WA, CA, and OR states - New Deaths", y = "number of new deaths")
+
+```
+
+
+
+
+### Analyse data: **What are the best and worst states?**
+
+
+Transform data to a new table which summarizes the `deaths`, `cases`, `cases_per_thou`, and `deaths_per_thou` in each state.
+`arrange` the rows in ascending number of `deaths` in each state.
+
+```{r}
+us_state_totals <- us_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000 * cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>%
+  filter(cases > 0, population > 0) %>%
+  arrange(deaths)
+
+us_state_totals
+            
+```
+
+The 10 states with the **lowest death rates per 1000 population**.
+
+```{r}
+us_state_totals %>%
+  slice_min(deaths_per_thou, n = 10) %>%
+  select(Province_State, deaths_per_thou, cases_per_thou, everything())
+  
+```
+
+The 10 states with the **highest death rates per 1000 population**.
+
+```{r}
+us_state_totals %>%
+  slice_max(deaths_per_thou, n = 10) %>%
+  select(Province_State, deaths_per_thou,cases_per_thou, everything())
+  
+```
+
+The 10 states with the **highest case rates per 1000 population**.
+
+```{r}
+us_state_totals %>%
+  slice_max(cases_per_thou, n = 10) %>%
+  select(Province_State,cases_per_thou, deaths_per_thou, everything())
+
+us_state_totals
+```
+
+#### My Additional Analyses and Visualizations
+
+In these analyses I tried to filter and limit the number of states to approximately 10 so that the visualizations are not too crowded. I looked at the states with the highest death rates per 1000 and highest case rates per thousand.
+
+Visualize the **total deaths per state** for those states that have a total death of *greater than 33000*. First, `filter` the data and analyze it in a table; `arrange` in ascending order of number of deaths.
+
+```{r}
+deaths_states_1 <- us_state_totals %>%
+  filter(deaths > 33000) %>%
+  arrange(deaths) %>%
+  select(Province_State, deaths)
+
+deaths_states_1
+```
+
+Visualize the above table as a bar graph (with geom_col()). Use `fct_reorder()` from forcats package to reorder the States in descending order of number of total `deaths`.
+ 
+```{r}
+
+deaths_states_1 %>% 
+  ggplot(aes(x = fct_reorder(Province_State, deaths), y = deaths, group = Province_State, fill = Province_State)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(x = "States", y = "Number of deaths", title = "COVID19 Total Deaths in US States with Highest Numbers ") 
+
+deaths_states_1
+```
+
+Reverse ordering , i.e., ascending, is achieved with `fct_rev()`.
+
+```{r}
+
+cases_states <- us_state_totals %>%
+  filter(cases > 2500000) %>%
+  ggplot(aes(x = fct_rev(fct_reorder(Province_State, cases)), y = cases, group = Province_State, fill = Province_State)) +
+  geom_col(show.legend = FALSE) +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 30)) +
+  labs(x = "States", y = "Number of cases", title = "COVID19 Total Cases in US States with Highest Numbers") 
+ 
+
+cases_states
+```
+
+
+Visualize the states with the **highest death rates per 1000**.
+
+
+```{r}
+# need to improve the labeling
+deaths_states_2 <- us_state_totals %>%
+  filter(deaths_per_thou > 3.6) %>%
+  ggplot(aes( x = fct_reorder(Province_State, deaths_per_thou), y =deaths_per_thou, group = Province_State, color = Province_State)) +
+  geom_point(show.legend = FALSE, size = 7, shape = 15) +
+  coord_flip() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 0)) +
+  labs(title = "COVID19 Total Death Rates per 1000 in US States with Highest Rates", x = "States", y = "Death rates per 1000",)
+
+deaths_states_2
+```
+
+**Question: What is the trend of new_deaths in the states which have had the highest death rates in the last 2 years?**
+
+At what time points during the pandemic have they had the highest rate of `new_deaths`? 
+ 
+Has the number of `new_deaths` fluctuated with adopted preventative measures and policies and vaccinations in these states? To answer this question we need more data regarding the type and timeline of the policies, vaccination administration as well as the introduction of new COVID strains in the specific locale.
+
+```{r}
+# filtered the deaths_per_thou to greater than 3.9, so that I would have less than 5 states to visualize (i.e., decrease crowding)
+
+states_highest_death_rate <- us_state_totals %>%
+  filter(deaths_per_thou > 3.9) %>%
+  select(Province_State)
+
+# use deframe() to change the tibble to a vector
+states_highest = deframe(states_highest_death_rate)
+states_highest
+```
+
+Plot the `new_deaths` in these states.
+
+```{r}
+
+us_by_state %>%
+  filter(new_cases > 0 & Province_State == states_highest) %>%
+  ggplot(aes(x = date, y = new_deaths, group = Province_State, color = factor(Province_State))) +
+  geom_point(show.legend = FALSE) +
+  scale_y_log10() +
+  # used facet_wrap to graph the data for each state individually
+  facet_wrap(~ Province_State, ncol = 2) +
+  labs(title = "COVID19 - New Deaths Trends in the States with the Highest Death Rates", y = "Number of new deaths (log)", x = 'Date')
+
+```
+
+**Question: What is the trend of new_deaths in the states which have had the lowest death rates in the last 2 years?**
+
+How do these compare to the states which have had the highest death rates?
+
+```{r}
+# filtered the deaths_per_thou to greater than 3.9, so that I would have less than 5 states to visualize (i.e., decrease crowding)
+
+states_lowest_death_rate <- us_state_totals %>%
+  filter(deaths_per_thou < 1.5) %>%
+  select(Province_State)
+
+# use deframe() to change the tibble to a vector
+states_lowest = deframe(states_lowest_death_rate)
+states_lowest
+```
+
+Plot the `new_deaths` in these states.
+
+```{r}
+us_by_state %>%
+  filter(new_cases > 0 & Province_State == states_lowest) %>%
+  ggplot(aes(x = date, y = new_deaths, group = Province_State, color = factor(Province_State))) +
+  geom_point(show.legend = FALSE) +
+  scale_y_log10() +
+  facet_wrap(~ Province_State, ncol = 2) +
+  labs(title = "COVID19 - New Deaths Trends in the States with Lowest Death Rates", y = "Number of new deaths (log)", x = "Date")
+```
+
+**Observation:** Except for the state with very low numbers of new deaths, in both the states with the highest and lowest new deaths we can discern a cyclical pattern of high and lows that may correspond to the emergence of the COVID19 virus strains or specific national events (such as  travel and gatherings during the Christmas and New Year holidays).
+
+
+### Modeling the Data - part 1
+
+As enumerated in the week 3 lecture on 'Modeling Data' some variables that can be added and considered for to the model include population density, climate of the area, political affiliation, extent of the lock down, etc.
+
+
+**Model 1:** `cases_per_thou` as a predictor for `deaths_per_thou` (a linear model)
+
+Plot the two variables as a scatter plot to see their relationship.
+
+```{r}
+us_state_totals %>% ggplot(aes(cases_per_thou,deaths_per_thou)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "COVID19 - cases per thousand as a predictor of death rates per thousand", x = "cases per thousand", y = "deaths per thousand")
+
+```
+
+The linear model ...
+
+```{r}
+mod_1 <- lm(deaths_per_thou ~ cases_per_thou, data = us_state_totals)
+
+summary(mod_1)
+
+```
+
+We can calculate`slice_min` and `slice_max` of the variable `cases_per_thou` to determine the range of values in `cases_per_thou`.
+
+```{r}
+min_cases <- us_state_totals %>%
+  slice_min(cases_per_thou) %>%
+  select(cases_per_thou)
+
+min_cases = as.integer(min_cases)
+min_cases
+
+```
+
+```{r}
+max_cases <- us_state_totals %>%
+  slice_max(cases_per_thou) %>%
+  select(cases_per_thou) 
+
+max_cases = as.integer(max_cases)
+max_cases
+```
+
+The `cases_per_thou` variable therefore ranges from `r min_cases` to `r max_cases`.
+
+
+`mutate` a new variable for the predicted death rate per thousand (`pred`) and `arrange` the tibble'
+in ascending order for the value of `pred`.
+
+Look at the 10 highest predicted death rates using `tail`.
+
+
+```{r}
+us_state_w_pred <- us_state_totals %>% 
+  mutate(pred = predict(mod_1)) %>%
+  arrange(pred) %>%
+  select(Province_State, pred, deaths_per_thou, cases_per_thou, everything())
+
+tail(us_state_w_pred, 10)
+```
+
+Plot the actual `deaths_per_thou` and the predicted death per thousand (`pred`) and compare the values.
+
+```{r}
+us_state_w_pred  %>% ggplot +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue", size = 3) +
+  geom_point(aes(x = cases_per_thou, y = pred), color = "red", size = 3) +
+  labs(title = "COVID19 - predicted (red) and actual (actual) death rates", x = "cases per thousand", y = "deaths per thousand")
+  
+  
+```
+
+
+The predicted values which were shown in the week 3 lecture that was recorded approximately a year ago demonstrated that `mod_1` did a relatively good job of predicting the `death_per_thou` at the lower and higher ends of the `cases_per_thou` range. 
+
+However, this is not necessarily as true when we analyze the data for the last 2 years - probably secondary to a host of additional variables that have been introduced such as more widespread vaccinations and new COVID strains with different degrees of contagiousness and disease severity.
+
+
+### Modeling the Data - part 2
+
+The second linear model will evaluate population density as an independent variable and cases per thousand as the dependent variable using the US data set.
+
+The population densities for the year 2020 are from the **"List of states and territories of the United States by population density"**, [link](https://en.wikipedia.org/wiki/List_of_states_and_territories_of_the_United_States_by_population_density?msclkid=c8a2e5a2ceef11ecb800ced6a18eb5c9), on Wikepedia. 
+
+I could not find this info readily as a csv file and therefore, I chose to add the population density (per kilometer squared) to a vector, `pop_density`, and then add this vector as a column to the `us_states` data set.
+
+
+```{r}
+# Population density of the 56 states (in alphabetical order)
+
+pop_density <- c(38.3, 0.5, 251, 24.3, 22.3, 98.0, 21.5, 288, 196, 4361, 155, 71.9, 283, 87.5, 8.6, 89.1, 73.1, 22.1, 13.9, 44.1, 41.6, 17.1, 246, 348, 68.8, 27.7, 24.4, 34.6, 2.9, 9.9, 10.9, 59.4, 488, 6.7, 166, 82.9, 4.4, 100, 111, 22.3, 17.0, 112, 371, 410, 65.7, 4.5, 64.7, 43.1, 251, 15.4, 26.9, 84.4, 44.8, 28.8, 42.0, 2.3)
+
+
+head(pop_density)
+```
+
+Add this vector as a column to `us_state_totals`.
+
+```{r}
+# arrange the tibble in alphaberical order (bases on Province_State) to match the order in the pop_density vector
+us_state_totals <- us_state_totals %>%
+  arrange(Province_State)
+
+# add the new column of pop_density to the tibble
+us_state_totals$Pop_Density <- pop_density
+
+# print out the new tibble and check that the correct values in the Pop_Density column have been associated with each state
+us_state_totals %>%
+  select(Province_State, Pop_Density, everything())
+
+```
+**Observation:** The District Of Columbia is somewhat of an outlier with a population density of 
+4361 per kilometers squared. New Jersey has the second highest population density.
+
+
+Evaluate the range of values for population density in the 56.
+
+```{r}
+us_state_totals %>% 
+  filter(Pop_Density > 100) %>%
+  ggplot(aes(x = fct_reorder(Province_State, Pop_Density), Pop_Density,  group = Province_State, color = Province_State)) +
+  geom_point(show.legend = FALSE, size = 7, shape = 15) +
+  coord_flip() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 0)) +
+  labs(title = "Population Density in the US states in 2020", x = "States", y = "Population Density (per km^2)")
+
+  
+  
+```
+
+**Observation:** the population density for District of Columbia (DC) is an outlier.
+
+
+
+**Model 2**`Pop_Density` as a predictor for cases_per_thou and`deaths_per_thou` (a linear model)
+
+Plot the two variables as a scatter plot to see their relationship.
+As the population density for DC is an outlier, I will not include DC in the model.
+
+
+```{r}
+
+us_state_totals_minusDC <- us_state_totals %>%
+  filter(Province_State != "District of Columbia") 
+
+us_state_totals_minusDC %>% 
+  ggplot(aes(Pop_Density, cases_per_thou)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "COVID19 - population density as a predictor of cases rates per thousand", x = "population density", y = "cases per thousand")
+
+```
+
+
+Linear model for the two variables.
+
+```{r}
+mod_2 <- lm(cases_per_thou ~ Pop_Density, data = us_state_totals_minusDC)
+
+summary(mod_2)
+
+```
+
+Plot the prediction for `cases_per_thou` based on `Pop_Density`.
+
+
+```{r}
+us_state_w_pred_2 <- us_state_totals_minusDC  %>% 
+  mutate(cases_pred = predict(mod_2)) %>%
+  ggplot() +
+  geom_point(aes(x = Pop_Density, y = cases_per_thou), color = "blue", size = 3) +
+  geom_point(aes(x = Pop_Density, y = cases_pred), color = "red", size = 3) +
+  labs(title = "COVID19 - predicted (red) and actual (actual) case rates", x = "population density", y = "cases per thousand")
+  
+us_state_w_pred_2
+
+```
+**Observation**: population density does not explain the variations in cases per thousand across different states. Note that this is overall a very big picture view of the problem as more optimally population density in different counties, cities or even neighborhoods could be used as a predictive variable (in conjunction with other predictive variables such as household income, ...).
+
+
+
+**Model 3** `Pop_Density` as a predictor for `deaths_per_thou` (a linear model)
+
+The same process can be used to evaluate the relationship between these two variables. I will replicate the steps in Model 2 as a chain of code chunks for this model.
+
+```{r}
+us_state_totals_minusDC %>% 
+  ggplot(aes(Pop_Density, deaths_per_thou)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "COVID19 - population density as a predictor of death rates per thousand", x = "population density", y = "deaths per thousand")
+
+```
+```{r}
+mod_3 <- lm(deaths_per_thou ~ Pop_Density, data = us_state_totals_minusDC)
+
+summary(mod_3)
+```
+
+```{r}
+us_state_w_pred_3 <- us_state_totals_minusDC  %>% 
+  mutate(deaths_pred = predict(mod_3)) %>%
+  ggplot() +
+  geom_point(aes(x = Pop_Density, y = deaths_per_thou), color = "blue", size = 3) +
+  geom_point(aes(x = Pop_Density, y = deaths_pred), color = "red", size = 3) +
+  labs(title = "COVID19 - predicted (red) and actual (actual) death rates", x = "population density", y = "deaths per thousand")
+  
+us_state_w_pred_3
+```
+
+**Observation**: Similar to Model 2, population density does not explain the variations in deaths per thousand across different states.
+
+
+### Sources of Bias
+
+The sources of bias in the US and global data sets are due to how the data were collected and reported and a multitude of other factors. Different states and countries may have different criteria for counting an individual as having contracted COVID or attributing a death to COVID. The population density and lock down and masking policies effect the transmission of the virus in the community as well the cohorts who are more likely to get exposed. Another source of bias is the different strains of the COVID virus - these may all not have the same degree of contagiousness or cause the comparable disease severity. Access to the COVID vaccine and the timing of vaccination during the pandemic have varied both between and within countries - moreover, political affiliations have clouded individual's choices in receiving the vaccine.
+
+The reporting bias could result in under reporting of both cases and deaths. These data also do not capture the age of those affected and those who succumbed to the disease - the susceptibility of different age groups to the evolving strains may also have changed over time. 
+
+
+## Conclusion
+
+For this assignment I replicated the code that used by Dr.Wall in the week three lectures and added my own analyses, visualizations and models. The assignment is somewhat lengthy as I have tried to meticulously document the exploratory and analytic steps. Moreover, I am new to R and I have learned a lot from the impressive online resources available for R programming and tidyverse which I tried to implement in the analyses and visualizations.
+
+This assignment reinforced how complex data wrangling, analysis, visualization and modeling can be. I look forward to learning more on these subjects in future courses.
+
+
+
+#### Session Info
+
+```{r}
+sessionInfo()
+```
+
+
+
